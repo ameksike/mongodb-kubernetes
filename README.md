@@ -4,6 +4,10 @@ Using MongoDB Controllers for Kubernetes (MCK) to deploy MongoDB, Ops Manager an
 This is an opinionated, non-production tutorial aiming to PoC the main EA components locally.  
 Feel free to clone this repo and to apply changes as you prefer.  
 
+## Disclaimer
+
+This software is not supported by MongoDB, Inc under any of their commercial support subscriptions or otherwise. Any usage of this tool is at your own risk. It's intended only to serve as a quick test/reproduction environment.
+
 ## Prerequisities
 
 - [Git](https://git-scm.com/install/) for cloning this repo and execute the commands.
@@ -14,24 +18,19 @@ Feel free to clone this repo and to apply changes as you prefer.
 - [K3d](https://k3d.io/stable/) to create local Kubernetes clusters.
 - [K9s](https://k9scli.io/) to manage your local clusters (optional but recommended).
 
-### Recommendations
-- Docker resource allocation to avoid issues: `Docker -> Settings -> Resources`.  
-- Memory limit: at least `15GB`
-- CPU limit: `10`
 
 ## Summary of what we will do
 After installing all the tools, we will:  
-- clone this repository in your local machine.
 - create a local Kubernetes cluster with K3d.
-- add the Helm repository for installing the Operator.
 - install the Operator (MCK).
 - deploy OpsManager with AppDB (3 members).
-- deploy a MongoDB replicaset (3 members) without authentication.
-- enable SCRAM authentication in the replica-set.
-- create 3 database users: `mdb-admin`, `mdb-user` and `search-sync-source`.
-- insert a sample data in your local database .
+- deploy a MongoDB replica-set (3 members) with and without SCRAM auth.
 - deploy `Search` and create Search & Vector Search indexes.
-- execute `Search` and `Vector Search` queries.
+- enable TLS and create the certificates
+
+This is an opinionated guide, we will always use:  
+- namespace: `mongodb-operator`
+- Kube context: `k3d-mongodb-mck-cluster`
 
 ## Clone this repo in your local machine
 
@@ -40,6 +39,11 @@ The first step is to clone this repository in your local machine in order to hav
 ```
 git clone https://github.com/vinilage/mck-om.git
 ```
+
+## Increase the resources in Docker
+To avoid issues related to resources (CPU, RAM), go to `Docker -> Settings -> Resources` and set:
+- Memory limit: at least `15GB`
+- CPU limit: `10`
 
 ## Setup a local K3d cluster
 
@@ -54,12 +58,16 @@ Verify the new cluster by running ``kubectl get nodes`` command or with `k9s`.
 
 ## Install the operator
 
-To install the MongoDB Controllers for Kubernetes (enterprise) run:
+To install the MongoDB Controllers for Kubernetes (enterprise) in `dev` mode run:
 
 ```
 helm repo add mongodb https://mongodb.github.io/helm-charts
 helm repo update
-helm install kubernetes-operator mongodb/mongodb-kubernetes --namespace mongodb-operator --create-namespace
+
+helm install kubernetes-operator mongodb/mongodb-kubernetes \
+  --namespace mongodb-operator \
+  --create-namespace \
+  --set operator.env=dev
 ```
 
 This will install the latest version of the MCK operator via Helm.  
@@ -85,7 +93,7 @@ You will see the pods starting:
 
 After around 15 minutes, if you run ``k9s -n mongodb-operator`` you must see:
 
-![Alt text](/images/k9s-after-install.png)
+![Alt text](/img/k9s-after-install.png)
 
 ## Accessing OpsManager via browser
 
@@ -105,21 +113,124 @@ http://localhost:8080
 
 You will see the login page of OpsManager running in your local Kubernetes cluster.
 
-![Alt text](/images/om-login.png)
+![Alt text](/img/om-login.png)
 
 ### Create a new OM user
 
 If this is your first access with OpsManager, create a new user by clicking in Sign-up.  
-Fill all the fields, and you will be redirected to the control panel web-app.
+Fill all the fields, and you will be redirected to the control panel web-app.  
+
 
 ## Next steps...
 
 - [Deploy replica-set](https://github.com/vinilage/mck-om/blob/main/replica-set/README.md)
+- [Enable SCRUM and create database users](https://github.com/vinilage/mck-om/blob/main/user/README.md)
 - [Deploy Search & Vector Search](https://github.com/vinilage/mck-om/blob/main/search/README.md)
+- [Enable TLS](https://github.com/vinilage/mck-om/blob/main/tls/README.md)
 - Deploy sharded cluster
 - Deploy multi-cluster
-- Configure TLS
-- Enable backup
+- Enable backup 
+  
+# Optional Steps
+
+## Connect to AppDB 
+
+In case you need to connect to AppDB with Compass, you need to:
+
+Port forward the AppDB `svc/ops-manager-db-svc` service:
+```
+kubectl port-forward -n mongodb-operator svc/ops-manager-db-svc 27017:27017
+```
+
+The `password` to connect is stored in the `ops-manager-db-om-password` Kubernetes secret, get its value by:
+``` 
+kubectl get secret ops-manager-db-om-password -n mongodb-operator -o jsonpath='{.data.password}' | base64 --decode
+``` 
+
+Configure a new Compass connection, where the username is `mongodb-ops-manager`, so the connection string is:
+
+```
+mongodb://mongodb-ops-manager:<password>:27017/admin?authSource=admin&directConnection=true
+```
+
+Users are stored in `mmsdbconfig.config.users` in case you forgot the password and SMTP is not configured to remind it.
+
+#### No write access if not connected to the primary: 
+Sometimes it happen that you are not connected to the primary member, then you cannot write in the database.  
+This happens because the Kubernetes Service routes your traffic to a random pod of the AppDB replica-set.  
+  
+A "quick and dirt" way is to force the port forward to each of the pods `0`, `1`, `2` and try to connect, one at a time.  
+In Compass, click in the refresh button next to the database.  
+
+```
+kubectl port-forward -n mongodb-operator pod/ops-manager-db-0 27017:27017
+```
+If you are now connected to the primary, a `+` icon will appear!  
+
+![Alt text](/img/compass-primary.png)
+     
+# Common Issues and Hints
+
+### 1. Pods get stuck at startup after restarting Docker 
+If you restart Docker and restart the containers, sometimes Pods can get stuck.  
+If this happens, force them to be deleted, so they are re-created:
+
+``` 
+kubectl delete pod <pod> -n mongodb-operator --grace-period=0 --force
+```
+
+### 2. YAML changes are not taking effect
+If you restart Docker, you need to update the MCK's IP in OpsManager's `API Access List`.  
+The steps are described above!  
+If the IP is not updated, the YAML changes will not take effect.  
+
+### 3. Read Opaque Secrets with K9s
+Usually the secrets are type opaque.  
+To read them easily via K9s: `:` -> `secrets` -> select the opaque secret and press `x`.
+
+### 4. See All Networking Info
+Set the environment variable `OM_DEBUG_HTTP=true` to the Operator deployment.
+
+```
+helm upgrade kubernetes-operator mongodb/mongodb-kubernetes \
+  --namespace mongodb-operator \
+  --reuse-values \
+  --set operator.additionalEnv[0].name="OM_DEBUG_HTTP" \
+  --set operator.additionalEnv[0].value="true"
+```
+
+### 5. Better logs with K9s
+To open logs with K9s, you press `L` and to format them better press `w`.  
+The logs of the Operator are in the `deployment`, you can: `:` -> `deploy` -> `l` -> `w`.
+
+### 6. Restoring sample data with TLS via mongodb-tools
+
+In case you have enabled TLS before importing the sample data to the database.  
+First copy the `ca.pem` file from the laptop to the Pod:  
+```
+kubectl cp <your directory>/mck-om/tls/ca.pem \
+  mongodb-operator/mongodb-tools-pod:/tmp/ca.pem \
+  --context k3d-mongodb-mck-cluster
+```
+
+Restoring data from inside of the Pod using the TLS certificate:  
+```
+mongorestore \
+  --uri="mongodb://mdb-admin:12345678@replica-set-svc.mongodb-operator.svc.cluster.local:27017/?replicaSet=replica-set&authSource=admin&tls=true&tlsCAFile=/tmp/ca.pem" \
+  --archive=/tmp/sample_mflix.archive \
+  --nsInclude 'sample_mflix.*'
+```
+
+Create Search index if TLS is enabled:  
+``` 
+mongosh \
+  --username mdb-admin \
+  --password 12345678 \
+  --authenticationDatabase admin \
+  --tls \
+  --tlsCAFile /tmp/ca.pem \
+  "mongodb://replica-set-0.replica-set-svc.mongodb-operator.svc.cluster.local:27017,replica-set-1.replica-set-svc.mongodb-operator.svc.cluster.local:27017,replica-set-2.replica-set-svc.mongodb-operator.svc.cluster.local:27017/?replicaSet=replica-set"
+```
 
 
 ## References

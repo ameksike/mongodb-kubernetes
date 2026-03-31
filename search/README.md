@@ -16,7 +16,10 @@ Go to `./search/` and run:
 kubectl apply -f mongodb-tools.yaml
 ```
 
-Connect to the newly created `mongodb-tools-pod` to execute commands via Shell:
+Connect to the newly created `mongodb-tools-pod` to execute commands via Shell.  
+You can use `K9s` by clicking in the `mongodb-tools-pod` and then `s` to open Shell.  
+
+Or you can execute:  
 
 ```
 kubectl exec -n mongodb-operator -it mongodb-tools-pod -- sh
@@ -46,10 +49,10 @@ kubectl port-forward -n mongodb-operator svc/replica-set-svc 27017:27017
 
 Connect with Compass with the following connection string:
 ```
-mongodb://admin:12345678@localhost:27017/admin?authSource=admin&directConnection=true
+mongodb://mdb-admin:12345678@localhost:27017/admin?authSource=admin&directConnection=true
 ```
 
-![Alt text](/images/Compass-sample-data.png)
+![Alt text](/img/Compass-sample-data.png)
 
 ### Deploy Search
 
@@ -124,7 +127,7 @@ kubectl port-forward pod/replica-set-0 27017:27017 -n mongodb-operator
 
 The indexes should be visible in Compass:  
 
-![Alt text](/images/compass-search-index.png)  
+![Alt text](/img/compass-search-index.png)  
 
 
 ## Querying
@@ -133,9 +136,12 @@ You can now query the data.
 See the [documentation](https://www.mongodb.com/docs/kubernetes/current/tutorial/fts-vs-quickstart/#query-the-data-using-the-index.) and try out different Search and Vector Search queries.
 
 An example of a result for Vector Search using Compass:
-![Alt text](/images/compass-search-result.png)  
+![Alt text](/img/compass-search-result.png)  
 
-## Enable Auto Embeddings
+## Continue...
+- [Enable TLS and Create Certificates](https://github.com/vinilage/mck-om/blob/main/tls/README.md)
+
+## Enable Auto Embeddings (optional)
 
 ### Create the API keys
 Create the API Keys in Atlas or in the VoyageAI.  
